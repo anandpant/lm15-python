@@ -461,28 +461,35 @@ def test_one_active_attempt_per_slot(sandbox: Path) -> None:
 @pytest.mark.parametrize("cooperative", [False, True])
 def test_async_cancellation_cannot_replace_saved_connection(sandbox: Path, monkeypatch, cooperative) -> None:
     import asyncio
+    from concurrent.futures import ThreadPoolExecutor
     from lm15.login import AsyncAuth
     from lm15.login.flows.base import LoginResult
     from lm15.login.flows.xai import XaiFlow
 
-    entered, approval = threading.Event(), threading.Event()
+    entered, approval = asyncio.Event(), threading.Event()
     auth = make_auth(sandbox, Clock())
     original = auth.set_api_key("xai", "original")
 
     def delayed_login(self, ctx, method, settings, answers):
-        entered.set()
+        loop.call_soon_threadsafe(entered.set)
         assert approval.wait(5)
         if cooperative:
             ctx.check()
         return LoginResult(material={"type": "api_key", "key": "replacement"}, label="replacement")
 
     monkeypatch.setattr(XaiFlow, "login", delayed_login)
+    loop = None
 
     async def run():
+        nonlocal loop
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
         task = asyncio.create_task(AsyncAuth(auth).login("xai", "device", ui=ScriptUI(), replace=original.id))
         try:
-            assert await asyncio.to_thread(entered.wait, 3)
+            await asyncio.wait_for(entered.wait(), 3)
             task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=1)
+            assert task in done, "cancellation must finish before the blocked login worker returns"
             with pytest.raises(asyncio.CancelledError):
                 await task
             reopened = Auth.local(sandbox / "credentials.json")

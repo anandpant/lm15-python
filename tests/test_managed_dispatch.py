@@ -148,6 +148,31 @@ def test_change_after_encoding_before_handoff_sends_nothing(monkeypatch, asynchr
     assert transport.requests == []
 
 
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("change", ["replace", "logout"])
+def test_shared_route_change_before_handoff_sends_nothing(monkeypatch, asynchronous, change):
+    auth = Auth.memory()
+    auth.set_api_key("meta", "shared")
+    transport = transport_for("complete", asynchronous)
+    lm = (AsyncLMRouter if asynchronous else LMRouter)(RouterConfig(auth=auth, transport=transport)).lm("meta-chat:muse")
+    emit = BaseProviderLM._emit
+
+    def after_encode(self, **kwargs):
+        sent = emit(self, **kwargs)
+        assert dict(sent.headers)["Authorization"] == "Bearer shared"
+        auth.set_api_key("meta-chat", "separate")
+        if change == "logout":
+            auth.logout("meta-chat")
+        return sent
+
+    monkeypatch.setattr(BaseProviderLM, "_emit", after_encode)
+    with pytest.raises(AuthOperationError) as error:
+        invoke(lm, "complete", asynchronous, model="muse")
+    assert error.value.reason == ("connection_changed" if change == "replace" else "login_required")
+    assert auth.status("meta").connection is not None
+    assert transport.requests == []
+
+
 def test_concurrent_logout_of_encoded_request(monkeypatch):
     auth = Auth.memory()
     local(auth, "a")
