@@ -500,6 +500,25 @@ def test_async_cancellation_cannot_replace_saved_connection(sandbox: Path, monke
     assert reopened.store.read()["xai"]["key"] == "newer"
 
 
+def test_login_expiring_after_approval_returns_typed_error(sandbox: Path, monkeypatch) -> None:
+    from lm15.login.flows.base import LoginResult
+    from lm15.login.flows.xai import XaiFlow
+
+    clock = Clock()
+    auth = make_auth(sandbox, clock)
+
+    def expired_approval(self, ctx, method, settings, answers):
+        clock.advance(61)
+        return LoginResult(material={"type": "api_key", "key": "late"}, label="late")
+
+    monkeypatch.setattr(XaiFlow, "login", expired_approval)
+    with pytest.raises(AuthOperationError) as error:
+        auth.login("xai", "device", ui=ScriptUI(), lifetime_s=60)
+    assert error.value.reason == "login_expired"
+    assert auth.status("xai").presence == "absent"
+    assert auth.set_api_key("xai", "later").provider == "xai"
+
+
 def test_an_interrupt_ends_the_attempt_and_frees_the_slot(sandbox: Path) -> None:
     # Ctrl-C — a notebook's cancel — while waiting for the provider, or at
     # a prompt: the attempt is over, so its reservation must not block the
