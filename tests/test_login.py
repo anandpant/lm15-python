@@ -458,6 +458,48 @@ def test_one_active_attempt_per_slot(sandbox: Path) -> None:
     auth.login("xai", "device", ui=ScriptUI())
 
 
+@pytest.mark.parametrize("cooperative", [False, True])
+def test_async_cancellation_cannot_replace_saved_connection(sandbox: Path, monkeypatch, cooperative) -> None:
+    import asyncio
+    from lm15.login import AsyncAuth
+    from lm15.login.flows.base import LoginResult
+    from lm15.login.flows.xai import XaiFlow
+
+    entered, approval = threading.Event(), threading.Event()
+    auth = make_auth(sandbox, Clock())
+    original = auth.set_api_key("xai", "original")
+
+    def delayed_login(self, ctx, method, settings, answers):
+        entered.set()
+        assert approval.wait(5)
+        if cooperative:
+            ctx.check()
+        return LoginResult(material={"type": "api_key", "key": "replacement"}, label="replacement")
+
+    monkeypatch.setattr(XaiFlow, "login", delayed_login)
+
+    async def run():
+        task = asyncio.create_task(AsyncAuth(auth).login("xai", "device", ui=ScriptUI(), replace=original.id))
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            reopened = Auth.local(sandbox / "credentials.json")
+            assert reopened.status("xai").connection.id == original.id
+            # Cancellation releases the reservation before approval returns,
+            # so a new operation can replace A immediately.
+            replacement = reopened.set_api_key("xai", "newer", replace=original.id)
+            return replacement.id
+        finally:
+            approval.set()
+
+    replacement_id = asyncio.run(run())  # joins the cancelled task's worker
+    reopened = Auth.local(sandbox / "credentials.json")
+    assert reopened.status("xai").connection.id == replacement_id
+    assert reopened.store.read()["xai"]["key"] == "newer"
+
+
 def test_an_interrupt_ends_the_attempt_and_frees_the_slot(sandbox: Path) -> None:
     # Ctrl-C — a notebook's cancel — while waiting for the provider, or at
     # a prompt: the attempt is over, so its reservation must not block the
@@ -969,3 +1011,57 @@ def test_meta_without_a_plan_says_pay_as_you_go(sandbox: Path) -> None:
                                                  "is_subs_active": False}))
     connection = auth.login("meta", "device", ui=ScriptUI(), allow_unverified=True)
     assert connection.account_label == "no Muse Code subscription (pay-as-you-go)"
+
+
+@pytest.mark.parametrize("route", ["meta", "meta-chat", "meta-anthropic"])
+def test_meta_routes_share_connection_renewal_and_logout(sandbox: Path, route) -> None:
+    from lm15.login.flows.meta import KEY_LIFETIME_S
+
+    clock = Clock()
+    server = FakeMeta({"api_key": "key-a", "base_url": "https://eu.api.meta.ai/v1"})
+    auth = make_auth(sandbox, clock, server)
+    connection = auth.login("meta", "device", ui=ScriptUI(), allow_unverified=True)
+    transport = FakeTransport([_models_reply(), _models_reply()])
+    router = LMRouter(RouterConfig(auth=auth, transport=transport, env={"META_API_KEY": "payg"}))
+    lm = router.lm(f"{route}:muse-wonder-full-1.0")
+    assert lm.list_models()
+    server.mint = {"api_key": "key-b", "base_url": "https://us.api.meta.ai/v1"}
+    clock.advance(KEY_LIFETIME_S)
+    assert lm.list_models()
+    for sent, region, key in zip(transport.requests, ("eu", "us"), ("key-a", "key-b")):
+        assert sent.url.split("?", 1)[0] == f"https://{region}.api.meta.ai/v1/models"
+        headers = {k.lower(): v for k, v in sent.headers}
+        assert key in (headers.get("x-api-key"), headers.get("authorization", "").removeprefix("Bearer "))
+    assert auth.status(route).connection.id == connection.id
+    assert auth.status(route).connection.credential_revision == "2"
+    assert auth.logout(route).forgot
+    with pytest.raises(AuthOperationError, match="signed out"):
+        lm.list_models()
+    assert len(transport.requests) == 2
+    router.close()
+
+
+@pytest.mark.parametrize("replace_connection", [False, True])
+@pytest.mark.parametrize("rejected", [False, True])
+def test_verification_stays_with_checked_connection(sandbox: Path, replace_connection, rejected) -> None:
+    auth = make_auth(sandbox, Clock())
+    original = auth.set_api_key("openai-chat", "key-a")
+    reply = FakeResponse(401, b'{"error":{"message":"rejected"}}') if rejected else _models_reply()
+
+    class ReplacingTransport(FakeTransport):
+        def stream(self, request):
+            if replace_connection:
+                auth.set_api_key("openai-chat", "key-b", replace=original.id)
+            return super().stream(request)
+
+    transport = ReplacingTransport([reply])
+    result = auth.verify("openai-chat", router_config=RouterConfig(transport=transport))
+    assert result.result == ("rejected" if rejected else "valid")
+    assert dict(transport.requests[0].headers)["Authorization"] == "Bearer key-a"
+    status = Auth.local(sandbox / "credentials.json").status("openai-chat")
+    if replace_connection:
+        assert status.connection.id != original.id
+        assert status.verification is None
+    else:
+        assert status.connection.id == original.id
+        assert status.verification == result
