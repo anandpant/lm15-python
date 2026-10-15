@@ -332,6 +332,67 @@ def test_bound_stays_pinned_and_plan_is_offline(monkeypatch):
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("ambient", [False, True])
+@pytest.mark.parametrize("override", [False, True])
+def test_saved_cloud_settings_follow_connection(monkeypatch, asynchronous, ambient, override):
+    from lm15.cloud import chains
+    from lm15.credentials import BearerToken
+
+    # Isolate cloud identity acquisition and profile discovery, not routing.
+    monkeypatch.setattr(chains.ChainContext, "online", lambda env: chains.ChainContext(env=env, files={}))
+    monkeypatch.setattr(chains, "credential_provider", lambda policy, ctx, *, named: BearerToken(f"token-{named}"))
+    auth = Auth.memory()
+    first = auth.configure("vertex", method="cloud", answers={"named": "environment"},
+                           settings={"project": "chosen-project", "location": "us-central1"})
+    env = {"GOOGLE_CLOUD_PROJECT": "ambient-project", "GOOGLE_CLOUD_LOCATION": "asia-east1"} if ambient else {}
+    settings = {"vertex": {"location": "europe-west4"}} if override else None
+    body = b'{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}'
+    transport = FakeAsyncTransport(body) if asynchronous else FakeTransport([FakeResponse(200, body)] * 2)
+    lm = (AsyncLMRouter if asynchronous else LMRouter)(RouterConfig(
+        auth=auth, env=env, settings=settings, transport=transport,
+    )).lm("vertex:gemini-2.5-flash")
+    assert invoke(lm, "complete", asynchronous, "gemini-2.5-flash").text == "ok"
+    auth.configure("vertex", method="cloud", answers={"named": "platform"}, replace=first.id,
+                   settings={"project": "replacement-project", "location": "us-east4"})
+    assert invoke(lm, "complete", asynchronous, "gemini-2.5-flash").text == "ok"
+    assert len(transport.requests) == 2
+    for sent, project, location, identity in zip(
+        transport.requests, ("chosen-project", "replacement-project"),
+        ("us-central1", "us-east4"), ("environment", "platform"),
+    ):
+        location = "europe-west4" if override else location
+        wire_pair(sent, f"token-{identity}",
+                  f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}"
+                  "/publishers/google/models/gemini-2.5-flash:generateContent")
+    assert first.settings == {"project": "chosen-project", "location": "us-central1"}
+    assert settings == ({"vertex": {"location": "europe-west4"}} if override else None)
+
+
+def test_connect_cannot_override_saved_cloud_identity(monkeypatch):
+    from lm15.cloud import chains
+    from lm15.credentials import BearerToken
+    from lm15.interactive import connect
+
+    monkeypatch.setattr(chains.ChainContext, "online", lambda env: chains.ChainContext(env=env, files={}))
+    monkeypatch.setattr(chains, "credential_provider", lambda policy, ctx, *, named: BearerToken(f"token-{named}"))
+    auth = Auth.memory()
+    first = auth.configure("vertex", method="cloud", answers={"named": "environment"})
+    body = b'{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}'
+    transport = FakeTransport([FakeResponse(200, body)])
+    config = RouterConfig(transport=transport, env={}, credentials={"vertex": "platform"},
+                          settings={"vertex": {"project": "chosen-project", "location": "us-central1"}})
+    client = connect("vertex", model="gemini-2.5-flash", auth=auth, ui=ScriptUI(), router_config=config)
+    assert client.complete(messages="hi").text == "ok"
+    assert dict(transport.requests[0].headers)["Authorization"] == "Bearer token-environment"
+    assert config.credentials == {"vertex": "platform"}
+    auth.configure("vertex", method="cloud", answers={"named": "platform"}, replace=first.id)
+    with pytest.raises(AuthOperationError) as error:
+        client.complete(messages="after replacement")
+    assert error.value.reason == "connection_changed"
+    assert len(transport.requests) == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
 def test_managed_websocket_fails_closed(monkeypatch, asynchronous):
     auth = Auth.memory()
     auth.set_api_key("openai", "token-a")

@@ -820,17 +820,25 @@ def test_connect_saves_login_before_picker_and_binds(sandbox: Path) -> None:
     auth = make_auth(sandbox, clock)
     transport = FakeTransport([_models_reply(), _chat_reply()])
     ui = ScriptUI([pick("xai"), pick("device"), pick("grok-4")])
-    lm = connect(auth=auth, ui=ui, router_config=RouterConfig(transport=transport))
+    config = RouterConfig(transport=transport, api_keys={"xai": "other-account"})
+    lm = connect(auth=auth, ui=ui, router_config=config)
     assert lm.selection.routed == "xai:grok-4" and lm.connection.kind == "account"
     reply = lm.complete(messages=[Message.user("hi")])
     assert reply.text == "hello"
-    sent = dict(transport.requests[-1].headers)
-    assert sent["Authorization"] == f"Bearer {ACCESS}1"
+    assert len(transport.requests) == 2
+    for sent in transport.requests:
+        assert dict(sent.headers)["Authorization"] == f"Bearer {ACCESS}1"
+    assert config.api_keys == {"xai": "other-account"}  # do not mutate the caller's config
     # the picker was cancelled on a second connect: the login stays saved
     ui2 = ScriptUI([pick(lm.connection.id), lambda p: (_ for _ in ()).throw(KeyboardInterrupt())])
     with pytest.raises(AuthOperationError):
         connect(auth=auth, ui=ui2, router_config=RouterConfig(transport=FakeTransport([_models_reply()])))
     assert auth.status("xai").presence == "saved"
+    auth.logout("xai")
+    with pytest.raises(AuthOperationError) as error:
+        lm.complete(messages="after logout")
+    assert error.value.reason == "login_required"
+    assert len(transport.requests) == 2
 
 
 def test_connect_offers_env_key_as_explicit_choice_only(sandbox: Path, monkeypatch: pytest.MonkeyPatch) -> None:
