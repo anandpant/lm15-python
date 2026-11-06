@@ -63,20 +63,35 @@ def test_fragments_then_final_copy_count_once():
     assert _calls(_read(OpenAILM(api_key="k"), payloads))[0] == ("get_weather", {"city": "Paris"})
 
 
-def test_a_fragment_the_final_copy_contradicts_is_refused():
+@pytest.mark.parametrize("streamed, final", [
+    ('{"city": "Lima"}', '{"city": "Paris"}'),
+    ('{"enabled": true}', '{"enabled": 1}'),
+    ('{"nested": [0, {"enabled": false}]}', '{"nested": [0, {"enabled": 0.0}]}'),
+])
+def test_a_fragment_the_final_copy_contradicts_is_refused(streamed, final):
     payloads = CODEX_PARALLEL[:2] + [
-        {"type": "response.function_call_arguments.delta", "output_index": 0, "delta": '{"city": "Lima"}'},
-    ] + CODEX_PARALLEL[2:]
+        {"type": "response.function_call_arguments.delta", "output_index": 0, "delta": streamed},
+        {"type": "response.output_item.done", "output_index": 0, "item": {
+            "type": "function_call", "call_id": "a", "name": "get_weather", "arguments": final,
+        }},
+    ] + CODEX_PARALLEL[4:]
     with pytest.raises(StreamAssemblyError) as caught:
         _read(OpenAILM(api_key="k"), payloads)
     assert caught.value.part_index == 0 and caught.value.code == "stream_assembly"
 
 
-def test_the_same_json_value_in_other_text_is_not_a_contradiction():
+@pytest.mark.parametrize("streamed, final, expected", [
+    ('{"city":"Paris"}', '{"city": "Paris"}', {"city": "Paris"}),
+    ('{"values":[1,0.5,true]}', '{"values": [1.0, 5e-1, true]}', {"values": [1, 0.5, True]}),
+])
+def test_the_same_json_value_in_other_text_is_not_a_contradiction(streamed, final, expected):
     payloads = CODEX_PARALLEL[:2] + [
-        {"type": "response.function_call_arguments.delta", "output_index": 0, "delta": '{"city":"Paris"}'},
-    ] + CODEX_PARALLEL[2:]
-    assert _calls(_read(OpenAILM(api_key="k"), payloads))[0] == ("get_weather", {"city": "Paris"})
+        {"type": "response.function_call_arguments.delta", "output_index": 0, "delta": streamed},
+        {"type": "response.output_item.done", "output_index": 0, "item": {
+            "type": "function_call", "call_id": "a", "name": "get_weather", "arguments": final,
+        }},
+    ] + CODEX_PARALLEL[4:]
+    assert _calls(_read(OpenAILM(api_key="k"), payloads))[0] == ("get_weather", expected)
 
 
 def test_members_in_another_order_are_a_contradiction():

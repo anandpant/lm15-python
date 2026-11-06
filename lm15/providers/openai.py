@@ -8,6 +8,7 @@ import os
 import re
 import urllib.parse
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Callable, ClassVar, Iterator, Mapping
 
 from ..adaptation import AdaptationPolicy, adapt, check_policy
@@ -511,8 +512,13 @@ class _FinalCopies:
 
 
 def _same_json(a: str, b: str) -> bool:
+    def number(text: str) -> tuple[str, Decimal]:
+        # JSON numbers can differ in spelling, but are never JSON booleans.
+        return ("number", Decimal(text))
+
     def load(text: str) -> Any:
-        return json.loads(text, object_pairs_hook=lambda pairs: ("object", tuple(pairs)))
+        return json.loads(text, object_pairs_hook=lambda pairs: ("object", tuple(pairs)),
+                          parse_int=number, parse_float=number)
 
     try:
         return load(a) == load(b)
