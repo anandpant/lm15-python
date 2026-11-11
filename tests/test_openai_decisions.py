@@ -5,41 +5,72 @@ from dataclasses import replace
 import pytest
 
 from lm15 import (
-    AsyncLMRouter, Config, DataPart, ImagePart, LMRouter, Message,
-    OpenAIDecisionsLM, ProviderError, Request, RouterConfig,
-    UnsupportedFeatureError, bounding_box, choice, judgments, score, yes_no,
+    AsyncLMRouter,
+    Config,
+    DataPart,
+    ImagePart,
+    LMRouter,
+    Message,
+    OpenAIDecisionsLM,
+    ProviderError,
+    Request,
+    RouterConfig,
+    UnsupportedFeatureError,
+    bounding_box,
+    choice,
+    judgments,
+    score,
+    yes_no,
 )
 from lm15.testing import FakeResponse, FakeTransport
-
 
 REQUEST = Request(
     model="openai-decisions:gpt-6-luna",
     messages=(Message.user(DataPart(value={"ticket": "Charged twice"})),),
-    config=Config(response_format=judgments(
-        urgent=yes_no("Is it urgent?"),
-        department=choice("Which department?", ["billing", "other"]),
-        severity=score("How severe?", ["low", "medium", "high"]),
-    )),
+    config=Config(
+        response_format=judgments(
+            urgent=yes_no("Is it urgent?"),
+            department=choice("Which department?", ["billing", "other"]),
+            severity=score("How severe?", ["low", "medium", "high"]),
+        )
+    ),
 )
 BODY = {
     "model": "gpt-6-luna",
     "answers": [
         {"name": "urgent", "type": "predicate", "probability": 0.8},
-        {"name": "department", "type": "choice", "choice": "billing", "confidence": 0.9,
-         "probabilities": [{"value": "billing", "probability": 0.9}, {"value": "other", "probability": 0.1}]},
-        {"name": "severity", "type": "score", "score": 1.6, "confidence": 0.7,
-         "probabilities": [{"value": 0, "label": "0", "probability": 0.1},
-                           {"value": 1, "label": "1", "probability": 0.2},
-                           {"value": 2, "label": "2", "probability": 0.7}]},
+        {
+            "name": "department",
+            "type": "choice",
+            "choice": "billing",
+            "confidence": 0.9,
+            "probabilities": [{"value": "billing", "probability": 0.9}, {"value": "other", "probability": 0.1}],
+        },
+        {
+            "name": "severity",
+            "type": "score",
+            "score": 1.6,
+            "confidence": 0.7,
+            "probabilities": [
+                {"value": 0, "label": "0", "probability": 0.1},
+                {"value": 1, "label": "1", "probability": 0.2},
+                {"value": 2, "label": "2", "probability": 0.7},
+            ],
+        },
     ],
-    "usage": {"input_tokens": 100, "output_tokens": 0, "total_tokens": 100,
-              "input_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 10}},
+    "usage": {
+        "input_tokens": 100,
+        "output_tokens": 0,
+        "total_tokens": 100,
+        "input_tokens_details": {"cached_tokens": 20, "cache_write_tokens": 10},
+    },
 }
 
 
 def transport(body=BODY, status=200):
-    return FakeTransport([FakeResponse(status=status, body=json.dumps(body).encode(),
-                                       headers=[("x-request-id", "req-test")])])
+    return FakeTransport(
+        [FakeResponse(status=status, body=json.dumps(body).encode(), headers=[("x-request-id", "req-test")])]
+    )
 
 
 def test_router_wire_and_all_answer_types():
@@ -63,12 +94,19 @@ def test_router_wire_and_all_answer_types():
 
 
 def test_structured_overrides_and_image_input():
-    request = replace(REQUEST, messages=(Message.user([
-        "Inspect", ImagePart(media_type="image/png", url="https://example.com/image.png")]),),
-        config=replace(REQUEST.config, extensions={"questions": {
-            "urgent": {"type": "noul", "instructions": {"rule": "Urgent?"}, "criteria": {"true": "today"}},
-            "department": {"criteria": {"billing": {"examples": ["refund"]}, "other": None}},
-        }}))
+    request = replace(
+        REQUEST,
+        messages=(Message.user(["Inspect", ImagePart(media_type="image/png", url="https://example.com/image.png")]),),
+        config=replace(
+            REQUEST.config,
+            extensions={
+                "questions": {
+                    "urgent": {"type": "noul", "instructions": {"rule": "Urgent?"}, "criteria": {"true": "today"}},
+                    "department": {"criteria": {"billing": {"examples": ["refund"]}, "other": None}},
+                }
+            },
+        ),
+    )
     payload = json.loads(OpenAIDecisionsLM(api_key="test").build_request(request, False).body)
     assert payload["input"][0]["content"][1]["image_url"] == "https://example.com/image.png"
     assert json.loads(payload["questions"][0]["instructions"])["criteria"] == {"true": "today"}
@@ -92,16 +130,20 @@ def test_rejects_boxes_and_streaming():
         lm.build_request(REQUEST, True)
 
 
-@pytest.mark.parametrize("mutation", [
-    lambda b: b["answers"].pop(),
-    lambda b: b["answers"][0].update(name="wrong"),
-    lambda b: b["answers"][0].update(probability=float("nan")),
-    lambda b: b["answers"][0].update(probability=True),
-    lambda b: b["answers"][1]["probabilities"][1].update(value="billing"),
-    lambda b: b["answers"][1].update(confidence=2),
-    lambda b: b["answers"][2]["probabilities"][0].update(value=False),
-    lambda b: b["answers"][2]["probabilities"][0].update(label="wrong"),
-])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda b: b["answers"].pop(),
+        lambda b: b["answers"][0].update(name="wrong"),
+        lambda b: b["answers"][0].update(probability=float("nan")),
+        lambda b: b["answers"][0].update(probability=True),
+        lambda b: b["answers"][1]["probabilities"][1].update(value="billing"),
+        lambda b: b["answers"][1].update(confidence=2),
+        lambda b: b["answers"][2]["probabilities"][0].update(value=False),
+        lambda b: b["answers"][2]["probabilities"][0].update(label="wrong"),
+        lambda b: b["answers"][2].update(score=10**400),
+    ],
+)
 def test_rejects_malformed_answers(mutation):
     body = copy.deepcopy(BODY)
     mutation(body)
