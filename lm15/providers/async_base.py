@@ -64,6 +64,7 @@ from .openai_codex import (
 )
 from .typesafe import TypeSafeLM
 from .openai_decisions import OpenAIDecisionsLM
+from .openrouter_decisions import OpenRouterDecisionsLM
 from .xai import DEFAULT_XAI_BASE_URL, XaiLM
 
 _T = TypeVar("_T")
@@ -1127,6 +1128,39 @@ class AsyncOpenAIDecisionsLM(AsyncBaseProviderLM):
 
     def __post_init__(self) -> None:
         self._inner = OpenAIDecisionsLM(
+            adaptations=self.adaptations,
+            api_key=self.api_key,
+            transport=_ForbiddenTransport(),
+            base_url=self.base_url,
+            access=self.access,
+            credentials_path=self.credentials_path,
+            settings=self.settings,
+            clock=self.clock,
+        )
+        self._mirror_binding()
+
+
+@dataclass
+class AsyncOpenRouterDecisionsLM(AsyncBaseProviderLM):
+    """Async mirror of :class:`OpenRouterDecisionsLM` (composition; the inner adapter
+    cannot reach the network)."""
+
+    api_key: Credential | None = field(default=None, repr=False)
+    transport: AsyncTransport = field(default_factory=default_async_transport)
+    base_url: str = "https://openrouter.ai/api/alpha"
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = None
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
+    adaptations: AdaptationPolicy = field(default="note", kw_only=True)
+
+    provider: str = field(default="openrouter-decisions", init=False)
+    manifest: ClassVar[ProviderManifest] = OpenRouterDecisionsLM.manifest
+
+    _inner: OpenRouterDecisionsLM = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self._inner = OpenRouterDecisionsLM(
             adaptations=self.adaptations,
             api_key=self.api_key,
             transport=_ForbiddenTransport(),

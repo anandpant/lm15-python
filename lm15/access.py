@@ -157,6 +157,13 @@ OPENAI_CODEX = AccessPolicy(
     base_url=DEFAULT_CODEX_BASE_URL,
 )
 
+OPENROUTER_DECISIONS_API = AccessPolicy(
+    provider="openrouter-decisions",
+    supports=EndpointSupport(complete=True, stream=False),
+    auth_modes=("bearer",),
+    env_keys=("OPENROUTER_API_KEY",),
+)
+
 OPENAI_DECISIONS_API = AccessPolicy(
     provider="openai-decisions",
     supports=EndpointSupport(complete=True, stream=False),

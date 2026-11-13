@@ -183,6 +183,7 @@ from .providers import (
     XaiLM,
     TypeSafeLM,
     OpenAIDecisionsLM,
+    OpenRouterDecisionsLM,
 )
 from .providers.openai_chat import request_from_openai_chat, response_from_openai_chat
 from .protocols import ProviderLM
@@ -196,6 +197,7 @@ from .providers.async_base import (
     AsyncXaiLM,
     AsyncTypeSafeLM,
     AsyncOpenAIDecisionsLM,
+    AsyncOpenRouterDecisionsLM,
 )
 
 # ── Stream assembly ──────────────────────────────────────────────────
@@ -272,7 +274,7 @@ __all__ = [
     # providers
     "providers",
     "bounding_box", "choice", "judgments", "score", "yes_no", "data",
-    "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM", "XaiLM", "TypeSafeLM", "AsyncTypeSafeLM", "OpenAIDecisionsLM", "AsyncOpenAIDecisionsLM",
+    "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM", "XaiLM", "TypeSafeLM", "AsyncTypeSafeLM", "OpenAIDecisionsLM", "AsyncOpenAIDecisionsLM", "OpenRouterDecisionsLM", "AsyncOpenRouterDecisionsLM",
     "ProviderLM",
     # the Chat Completions dialect read in: a request body -> Request (MAP-12), a response body -> Response
     "request_from_openai_chat", "response_from_openai_chat",

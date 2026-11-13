@@ -76,7 +76,9 @@ from .providers import (
     OpenAILM,
     TypeSafeLM,
     OpenAIDecisionsLM,
+    OpenRouterDecisionsLM,
     AsyncOpenAIDecisionsLM,
+    AsyncOpenRouterDecisionsLM,
     XaiLM,
 )
 
@@ -91,7 +93,7 @@ __all__ = [
 
 # The wire formats lm15 speaks.  A dialect is a class; a provider is a
 # dialect plus an access policy (plus a compat preset for the chat dialect).
-Dialect = Literal["openai-responses", "openai-chat", "anthropic", "gemini", "typesafe", "openai-decisions"]
+Dialect = Literal["openai-responses", "openai-chat", "anthropic", "gemini", "typesafe", "openai-decisions", "openrouter-decisions"]
 
 # A compat value: a preset name for a registry entry (validated against
 # the dialect's table below), or the object itself for a declared entry.
@@ -396,6 +398,10 @@ _DEFINITIONS: tuple[ProviderDefinition, ...] = (
         "openai", "openai-responses", OpenAILM, AsyncOpenAILM,
         console_url="https://platform.openai.com/api-keys",
         note="OpenAI Responses API",
+    ),
+    _adapter_owned(
+        "openrouter-decisions", "openrouter-decisions", OpenRouterDecisionsLM, AsyncOpenRouterDecisionsLM,
+        console_url="https://openrouter.ai/keys", note="OpenRouter typed Decisions API",
     ),
     _adapter_owned(
         "openai-decisions", "openai-decisions", OpenAIDecisionsLM, AsyncOpenAIDecisionsLM,

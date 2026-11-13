@@ -10,6 +10,7 @@ from .async_base import (
     AsyncTransport,
     AsyncTypeSafeLM,
     AsyncOpenAIDecisionsLM,
+    AsyncOpenRouterDecisionsLM,
     AsyncXaiLM,
 )
 from .base import BaseProviderLM, Credential, HttpResponse, ProviderDialect, SyncTransport, resolve_credential
@@ -20,6 +21,7 @@ from .openai_chat import OpenAIChatLM
 from .openai_codex import OpenAICodexLM
 from .typesafe import TypeSafeLM
 from .openai_decisions import OpenAIDecisionsLM
+from .openrouter_decisions import OpenRouterDecisionsLM
 from .xai import XaiLM
 
 __all__ = [
@@ -33,7 +35,7 @@ __all__ = [
     "AsyncXaiLM",
     "TypeSafeLM",
     "OpenAIDecisionsLM",
-    "AsyncOpenAIDecisionsLM",
+    "AsyncOpenAIDecisionsLM", "OpenRouterDecisionsLM", "AsyncOpenRouterDecisionsLM",
     "AsyncTypeSafeLM",
     "AsyncOpenAILM",
     "AsyncOpenAIChatLM",
