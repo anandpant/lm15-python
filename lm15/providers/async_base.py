@@ -1115,7 +1115,7 @@ class AsyncOpenAIDecisionsLM(AsyncBaseProviderLM):
     api_key: Credential | None = field(default=None, repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.openai.com/v1"
-    access: ProviderManifest | None = field(default=None, repr=False)
+    access: ProviderManifest = field(default=OpenAIDecisionsLM.manifest, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
     settings: "Mapping[str, str] | None" = None
     clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
@@ -1148,7 +1148,7 @@ class AsyncOpenRouterDecisionsLM(AsyncBaseProviderLM):
     api_key: Credential | None = field(default=None, repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://openrouter.ai/api/alpha"
-    access: ProviderManifest | None = field(default=None, repr=False)
+    access: ProviderManifest = field(default=OpenRouterDecisionsLM.manifest, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
     settings: "Mapping[str, str] | None" = None
     clock: "Callable[[], datetime] | None" = field(default=None, repr=False)

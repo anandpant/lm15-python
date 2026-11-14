@@ -15,7 +15,7 @@ from ..access import OPENAI_DECISIONS_API
 from ..errors import ProviderError, UnsupportedFeatureError
 from ..features import ProviderManifest
 from ..judgments import non_judgment_properties, request_judgments
-from ..types import Config, DataPart, ImagePart, Message, RefusalPart, Request, Response, TextPart
+from ..types import Config, DataPart, ImagePart, Message, Part, RefusalPart, Request, Response, TextPart
 from .base import HttpResponse
 from .common import parts_to_text, usage_from_responses
 from .openai import OpenAILM
@@ -58,8 +58,8 @@ class OpenAIDecisionsLM(OpenAILM):
             if override.get("type", kind) not in ({"noul", "predicate"} if kind == "predicate" else {kind}):
                 raise self._refuse("questions", f"override changes the answer type for {name!r}")
             instruction = override.get("instructions", judgment.instruction or name)
-            question = {"name": name, "type": kind, "instructions": _text(instruction)}
-            criteria = override.get("criteria")
+            question: dict[str, Any] = {"name": name, "type": kind, "instructions": _text(instruction)}
+            criteria: Any = override.get("criteria")
             if kind == "predicate":
                 if criteria is not None:
                     question["instructions"] = _text({"instructions": instruction, "criteria": criteria})
@@ -122,7 +122,7 @@ class OpenAIDecisionsLM(OpenAILM):
         if request.system:
             system = request.system if isinstance(request.system, str) else parts_to_text(request.system)
             inputs.insert(0, {"role": "developer", "content": system})
-        payload = {"model": request.model, "input": inputs, "questions": self._questions(request)}
+        payload: dict[str, Any] = {"model": request.model, "input": inputs, "questions": self._questions(request)}
         if cfg.user_id is not None:
             payload["safety_identifier"] = cfg.user_id
         payload.update({key: value for key, value in extensions.items() if key != "questions"})
@@ -207,11 +207,11 @@ class OpenAIDecisionsLM(OpenAILM):
                     or not 0 <= score <= len(expected) - 1
                 ):
                     raise invalid(f"invalid score for {name!r}")
-                value = int(max(probs, key=probs.get))
+                value = int(max(probs, key=lambda key: probs[key]))
             values[name], distributions[name] = value, probs
             evidence[name] = {"probabilities": probs, "confidence": confidence}
         try:
-            parts = [
+            parts: list[Part] = [
                 DataPart(
                     value=values,
                     probabilities=distributions or None,
@@ -220,13 +220,14 @@ class OpenAIDecisionsLM(OpenAILM):
             ]
             if refusals:
                 parts.append(RefusalPart(text="Decisions refused: " + ", ".join(refusals)))
+            provider_data: dict[str, Any] = {self.provider: data, "decisions": {"answers": evidence, "refusals": refusals}}
             return Response(
                 id=response.header("x-request-id"),
                 model=data.get("model", request.model),
                 message=Message(role="assistant", parts=tuple(parts)),
                 finish_reason="content_filter" if refusals else "stop",
                 usage=usage_from_responses(data.get("usage")),
-                provider_data={self.provider: data, "decisions": {"answers": evidence, "refusals": refusals}},
+                provider_data=provider_data,
             )
         except (TypeError, ValueError, OverflowError) as error:
             raise invalid(str(error)) from error
