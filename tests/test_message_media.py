@@ -60,3 +60,36 @@ def test_responses_user_media_is_sent_natively(kind):
 @pytest.mark.parametrize("kind", ["image", "document"])
 def test_anthropic_user_images_and_documents_are_sent(kind):
     assert "QUJD" in _body(AnthropicLM(api_key="k"), _request("claude-haiku-4-5", "user", MEDIA[kind]))
+
+
+@pytest.mark.parametrize("part,expected", [
+    (DocumentPart(media_type="application/pdf", data="JVBERi0xLjQK"), "data:application/pdf;base64,JVBERi0xLjQK"),
+    (DocumentPart(media_type="application/pdf", url="https://example.com/report.pdf"), "https://example.com/report.pdf"),
+])
+def test_openrouter_user_pdf_reaches_native_file_block(part, expected):
+    from lm15 import LMRouter, RouterConfig
+    lm = LMRouter(RouterConfig(api_keys={"openrouter": "k"})).lm("openrouter:openai/gpt-6-luna")
+    wire = json.loads(lm.build_request(_request("openai/gpt-6-luna", "user", part), False).body)
+    assert wire["messages"][0]["content"] == [
+        {"type": "text", "text": "q"},
+        {"type": "file", "file": {"filename": "document.pdf", "file_data": expected}},
+    ]
+
+
+@pytest.mark.parametrize("part", [
+    DocumentPart(media_type="text/plain", data="QUJD"),
+    DocumentPart(media_type="application/pdf", file_id="file-123"),
+    AUDIO,
+])
+def test_openrouter_still_refuses_unmapped_media(part):
+    from lm15 import LMRouter, RouterConfig
+    lm = LMRouter(RouterConfig(api_keys={"openrouter": "k"})).lm("openrouter:openai/gpt-6-luna")
+    with pytest.raises(UnsupportedFeatureError):
+        lm.build_request(_request("openai/gpt-6-luna", "user", part), False)
+
+
+def test_pdf_does_not_expand_other_chat_dialects_or_assistant_content():
+    for lm, role in [(OpenAIChatLM(api_key="k"), "user"),
+                     (OpenAIChatLM(api_key="k", compat="openrouter"), "assistant")]:
+        with pytest.raises(UnsupportedFeatureError):
+            lm.build_request(_request("gpt-6-luna", role, MEDIA["document"]), False)

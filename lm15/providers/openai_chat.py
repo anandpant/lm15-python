@@ -37,6 +37,7 @@ from ..transports import TransportRequest
 from ..types import (
     ReasoningEffort,
     DataPart,
+    DocumentPart,
     BuiltinTool,
     CacheConfig,
     CitationPart,
@@ -148,6 +149,17 @@ def _chat_content_parts(msg: Message, *, force_array: bool = False, provider: st
             out.append({"type": "text", "text": part.text})
         elif part.type == "image":
             out.append(_chat_image_block(part, provider))
+        elif (
+            isinstance(part, DocumentPart) and provider == "openrouter"
+            and msg.role == "user" and part.media_type == "application/pdf"
+            and part.file_id is None
+        ):
+            # OpenRouter's documented native PDF block. Keep this gateway-only:
+            # other chat dialects and unsupported media still fail MAP-10.
+            out.append({"type": "file", "file": {
+                "filename": "document.pdf",
+                "file_data": part.url if part.url is not None else media_data_uri(part),
+            }})
         elif isinstance(part, ThinkingPart):
             continue  # thinking is never replayed as user content
         elif part.type in MEDIA_KINDS:
